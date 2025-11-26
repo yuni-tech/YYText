@@ -17,7 +17,7 @@
 #import <libkern/OSAtomic.h>
 
 
-static dispatch_queue_t YYLabelGetReleaseQueue() {
+static dispatch_queue_t YYLabelGetReleaseQueue(void) {
     return dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0);
 }
 
@@ -377,6 +377,7 @@ static dispatch_queue_t YYLabelGetReleaseQueue() {
 
 - (void)_initLabel {
     ((YYTextAsyncLayer *)self.layer).displaysAsynchronously = NO;
+    ((YYTextAsyncLayer *)self.layer).blurRadius = 0;
     self.layer.contentsScale = [UIScreen mainScreen].scale;
     self.contentMode = UIViewContentModeRedraw;
     
@@ -1021,6 +1022,11 @@ static dispatch_queue_t YYLabelGetReleaseQueue() {
 - (void)setDisplaysAsynchronously:(BOOL)displaysAsynchronously {
     _displaysAsynchronously = displaysAsynchronously;
     ((YYTextAsyncLayer *)self.layer).displaysAsynchronously = displaysAsynchronously;
+}
+
+- (void)setBlurRadius:(CGFloat)blurRadius {
+    _blurRadius = blurRadius;
+    ((YYTextAsyncLayer *)self.layer).blurRadius = blurRadius;
 }
 
 #pragma mark - AutoLayout

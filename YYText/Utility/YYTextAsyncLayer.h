@@ -19,12 +19,14 @@ NS_ASSUME_NONNULL_BEGIN
 /**
  The YYTextAsyncLayer class is a subclass of CALayer used for render contents asynchronously.
  
- @discussion When the layer need update it's contents, it will ask the delegate 
+ @discussion When the layer need update it's contents, it will ask the delegate
  for a async display task to render the contents in a background queue.
  */
 @interface YYTextAsyncLayer : CALayer
 /// Whether the render code is executed in background. Default is YES.
 @property BOOL displaysAsynchronously;
+/// The blur radius of draw image layout. Default is 0.
+@property CGFloat blurRadius;
 @end
 
 

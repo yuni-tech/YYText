@@ -10,11 +10,12 @@
 //
 
 #import "YYTextAsyncLayer.h"
+#import <UIKit/UIKit.h>
 #import <libkern/OSAtomic.h>
-
+#import <CoreImage/CoreImage.h>
 
 /// Global display queue, used for content rendering.
-static dispatch_queue_t YYTextAsyncLayerGetDisplayQueue() {
+static dispatch_queue_t YYTextAsyncLayerGetDisplayQueue(void) {
 #define MAX_QUEUE_COUNT 16
     static int queueCount;
     static dispatch_queue_t queues[MAX_QUEUE_COUNT];
@@ -40,7 +41,7 @@ static dispatch_queue_t YYTextAsyncLayerGetDisplayQueue() {
 #undef MAX_QUEUE_COUNT
 }
 
-static dispatch_queue_t YYTextAsyncLayerGetReleaseQueue() {
+static dispatch_queue_t YYTextAsyncLayerGetReleaseQueue(void) {
 #ifdef YYDispatchQueuePool_h
     return YYDispatchQueueGetForQOS(NSQualityOfServiceDefault);
 #else
@@ -97,6 +98,7 @@ static dispatch_queue_t YYTextAsyncLayerGetReleaseQueue() {
     self.contentsScale = scale;
     _sentinel = [_YYTextSentinel new];
     _displaysAsynchronously = YES;
+    _blurRadius = 0;
     return self;
 }
 
@@ -111,12 +113,12 @@ static dispatch_queue_t YYTextAsyncLayerGetReleaseQueue() {
 
 - (void)display {
     super.contents = super.contents;
-    [self _displayAsync:_displaysAsynchronously];
+    [self _displayAsync:_displaysAsynchronously blurRadius: _blurRadius];
 }
 
 #pragma mark - Private
 
-- (void)_displayAsync:(BOOL)async {
+- (void)_displayAsync:(BOOL)async blurRadius:(CGFloat)blurRadius {
     __strong id<YYTextAsyncLayerDelegate> delegate = (id)self.delegate;
     YYTextAsyncLayerDisplayTask *task = [delegate newAsyncDisplayTask];
     if (!task.display) {
@@ -130,7 +132,7 @@ static dispatch_queue_t YYTextAsyncLayerGetReleaseQueue() {
         if (task.willDisplay) task.willDisplay(self);
         _YYTextSentinel *sentinel = _sentinel;
         int32_t value = sentinel.value;
-        BOOL (^isCancelled)() = ^BOOL() {
+        BOOL (^isCancelled)(void) = ^BOOL() {
             return value != sentinel.value;
         };
         CGSize size = self.bounds.size;
@@ -215,6 +217,9 @@ static dispatch_queue_t YYTextAsyncLayerGetReleaseQueue() {
                 image = UIGraphicsGetImageFromCurrentImageContext();
                 UIGraphicsEndImageContext();
             }
+            if (blurRadius > 0) {
+                image = [self _blurredImage:image withRadius:blurRadius];
+            }
             if (isCancelled()) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     if (task.didDisplay) task.didDisplay(self, NO);
@@ -233,12 +238,13 @@ static dispatch_queue_t YYTextAsyncLayerGetReleaseQueue() {
     } else {
         [_sentinel increase];
         if (task.willDisplay) task.willDisplay(self);
+        UIImage *image;
         if (@available(iOS 17, *)) {
             UIGraphicsImageRendererFormat *format = [[UIGraphicsImageRendererFormat alloc] init];
             format.opaque = self.opaque;
             format.scale = self.contentsScale;
             UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:self.bounds.size format:format];
-            UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext * _Nonnull rendererContext) {
+            image = [renderer imageWithActions:^(UIGraphicsImageRendererContext * _Nonnull rendererContext) {
                 CGContextRef context = rendererContext.CGContext;
                 if (self.opaque) {
                     CGSize size = self.bounds.size;
@@ -259,8 +265,6 @@ static dispatch_queue_t YYTextAsyncLayerGetReleaseQueue() {
                 }
                 task.display(context, self.bounds.size, ^{return NO;});
             }];
-            
-            self.contents = (__bridge id)(image.CGImage);
         } else {
             UIGraphicsBeginImageContextWithOptions(self.bounds.size, self.opaque, self.contentsScale);
             CGContextRef context = UIGraphicsGetCurrentContext();
@@ -282,16 +286,39 @@ static dispatch_queue_t YYTextAsyncLayerGetReleaseQueue() {
                 } CGContextRestoreGState(context);
             }
             task.display(context, self.bounds.size, ^{return NO;});
-            UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+            image = UIGraphicsGetImageFromCurrentImageContext();
             UIGraphicsEndImageContext();
-            self.contents = (__bridge id)(image.CGImage);
         }
+        if (blurRadius > 0) {
+            image = [self _blurredImage:image withRadius:blurRadius];
+        }
+        self.contents = (__bridge id)(image.CGImage);
         if (task.didDisplay) task.didDisplay(self, YES);
     }
 }
 
 - (void)_cancelAsyncDisplay {
     [_sentinel increase];
+}
+
+- (UIImage *)_blurredImage:(UIImage *)image withRadius:(CGFloat)radius {
+    CIImage *ciImage = [[CIImage alloc] initWithImage:image];
+    if (!ciImage) return image;
+    CIFilter *filter = [CIFilter filterWithName:@"CIGaussianBlur"];
+    if (!filter) return image;
+    [filter setValue:ciImage forKey:kCIInputImageKey];
+    [filter setValue:@(radius) forKey:kCIInputRadiusKey];
+
+    CIContext *context = [CIContext contextWithOptions:nil];
+    CIImage *outputCIImage = filter.outputImage;
+    if (!outputCIImage) return image;
+    
+    // need cropped
+    CGImageRef cgImage = [context createCGImage:outputCIImage fromRect:[ciImage extent]];
+    if (!cgImage) return image;
+    UIImage *blurredImage = [UIImage imageWithCGImage:cgImage scale:image.scale orientation:image.imageOrientation];
+    CGImageRelease(cgImage);
+    return blurredImage;
 }
 
 @end
